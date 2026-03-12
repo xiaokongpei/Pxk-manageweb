@@ -1,50 +1,72 @@
-﻿# Pxk Manage Web
+# Pxk Manage Web
 
-员工任务与打卡管理看板，基于 Vite、React、TypeScript、Tailwind CSS 和 dnd-kit 构建。
+员工任务与打卡管理看板，支持云端数据同步与多用户隔离。
 
 ## 项目简介
 
-这个项目用于管理员工、任务分配和工作统计，适合轻量级的内部排班、打卡辅助和任务跟踪场景。系统支持拖拽分配员工到任务、任务状态管理、按条件筛选任务、批量操作和数据导出。
+这是一个现代化的员工任务管理系统，支持多设备数据同步、用户数据隔离、拖拽分配任务等功能。每位用户拥有独立的数据空间，登录后可在任意设备访问自己的数据。
 
 ## 在线访问
 
-GitHub Pages 部署地址：
+Firebase Hosting 部署地址：
 
-[https://xiaokongpei.github.io/Pxk-manageweb/](https://xiaokongpei.github.io/Pxk-manageweb/)
-
-首次部署后，如果页面没有立刻可见，通常等待 GitHub Actions 执行完成即可。
+**[https://the-minister-s-rebirth-pxk.web.app](https://the-minister-s-rebirth-pxk.web.app)**
 
 ## 核心功能
 
-- 员工管理
-- 为员工维护身份编号、姓名、联系方式和备注
-- 任务管理
+### 用户系统
+- 邮箱密码注册 / 登录
+- Google 账号快捷登录
+- 用户数据完全隔离，每人只能看到自己的数据
+
+### 员工管理
+- 维护员工编号、姓名、联系方式、备注
+- 支持添加、编辑、删除员工
+
+### 任务管理
 - 创建、编辑、删除任务
 - 待完成任务池 / 已完成任务池
-- 可将任务标记完成或恢复为待办
-- 拖拽分配
+- 任务状态切换（待办 / 已完成）
+
+### 拖拽分配
 - 从员工列表拖拽到任务卡片进行分配
-- 统计与分析
-- 基于北京时间的任务日历
-- 员工工作次数柱状图统计
-- 支持按员工编号或工作次数排序
-- 筛选、批量操作与导出
+- 可视化分配状态
+
+### 统计与分析
+- 工作日历视图（基于北京时间）
+- 员工工作次数统计图表
+- 支持按编号或工作次数排序
+
+### 筛选与导出
 - 按日期、员工、关键词筛选任务
-- 批量完成、批量删除、批量分配员工
-- 导出 CSV / Excel
-- 本地持久化
-- 使用 `localStorage` 保存数据
+- 批量完成、批量删除、批量分配
+- 导出 CSV / Excel 格式
+
+### 云端同步
+- Firebase Firestore 实时数据库
+- 多设备自动同步
+- 数据持久化存储
 
 ## 技术栈
 
-- `Vite`
-- `React 18`
-- `TypeScript`
-- `Tailwind CSS`
-- `@dnd-kit/core`
-- `@dnd-kit/utilities`
+| 类别 | 技术 |
+|------|------|
+| 前端框架 | React 18 |
+| 构建工具 | Vite |
+| 语言 | TypeScript |
+| 样式 | Tailwind CSS |
+| 拖拽 | @dnd-kit/core |
+| 后端服务 | Firebase |
+| 认证 | Firebase Authentication |
+| 数据库 | Firebase Firestore |
+| 托管 | Firebase Hosting |
 
 ## 本地开发
+
+### 环境要求
+
+- Node.js 18+
+- npm 或 yarn
 
 ### 安装依赖
 
@@ -52,74 +74,109 @@ GitHub Pages 部署地址：
 npm install
 ```
 
-### 启动开发环境
+### 配置 Firebase（如需云同步功能）
+
+1. 创建 Firebase 项目：[Firebase Console](https://console.firebase.google.com/)
+2. 启用 Authentication（邮箱密码 + Google 登录）
+3. 启用 Firestore Database
+4. 创建 `.env` 文件：
+
+```env
+VITE_FIREBASE_API_KEY=你的API密钥
+VITE_FIREBASE_AUTH_DOMAIN=你的项目ID.firebaseapp.com
+VITE_FIREBASE_PROJECT_ID=你的项目ID
+VITE_FIREBASE_STORAGE_BUCKET=你的项目ID.appspot.com
+VITE_FIREBASE_MESSAGING_SENDER_ID=你的发送者ID
+VITE_FIREBASE_APP_ID=你的应用ID
+```
+
+### 启动开发服务器
 
 ```bash
 npm run dev
 ```
 
-### 类型检查
+### 其他命令
 
 ```bash
-npm run typecheck
-```
-
-### 生产构建
-
-```bash
-npm run build
-```
-
-### 本地预览构建产物
-
-```bash
-npm run preview
+npm run build      # 生产构建
+npm run preview    # 预览构建产物
+npm run typecheck  # 类型检查
 ```
 
 ## 项目结构
 
 ```text
 .
-|- .github/
-|  |- workflows/
-|     |- deploy.yml
-|- src/
-|  |- components/
-|  |- data/
-|  |- hooks/
-|  |- utils/
-|  |- App.tsx
-|  |- index.css
-|  |- main.tsx
-|  |- types.ts
-|- index.html
-|- package.json
-|- tailwind.config.cjs
-|- tsconfig.json
-|- vite.config.ts
+├── src/
+│   ├── components/     # React 组件
+│   │   ├── AuthPage.tsx
+│   │   ├── EmployeePanel.tsx
+│   │   ├── TaskBoard.tsx
+│   │   ├── TaskCard.tsx
+│   │   └── ...
+│   ├── contexts/       # React Context
+│   │   └── AuthContext.tsx
+│   ├── hooks/          # 自定义 Hooks
+│   │   └── useFirestoreState.ts
+│   ├── lib/            # 第三方库配置
+│   │   └── firebase.ts
+│   ├── data/           # 初始数据
+│   ├── utils/          # 工具函数
+│   ├── App.tsx
+│   ├── main.tsx
+│   └── types.ts
+├── firebase.json       # Firebase 配置
+├── .firebaserc         # Firebase 项目配置
+├── vite.config.ts
+├── tailwind.config.cjs
+└── package.json
 ```
 
-## GitHub Pages 部署说明
+## 部署指南
 
-项目已经配置 GitHub Pages 自动部署：
+### 部署到 Firebase Hosting
 
-- 工作流文件：`.github/workflows/deploy.yml`
-- Vite 部署基础路径：`/Pxk-manageweb/`
+1. 安装 Firebase CLI：
+   ```bash
+   npm install -g firebase-tools
+   ```
 
-当代码推送到 `main` 分支后，GitHub Actions 会自动：
+2. 登录 Firebase：
+   ```bash
+   firebase login
+   ```
 
-1. 安装依赖
-2. 执行构建
-3. 发布 `dist` 目录到 GitHub Pages
+3. 初始化项目（如果还没有）：
+   ```bash
+   firebase init hosting
+   ```
 
-如果仓库还没有启用 GitHub Pages，请在 GitHub 仓库设置中确认：
+4. 构建并部署：
+   ```bash
+   npm run build
+   firebase deploy
+   ```
 
-- `Settings`
-- `Pages`
-- `Source` 使用 `GitHub Actions`
+### 部署到其他平台
 
-## 说明
+如需部署到其他平台（如 Vercel、Netlify），只需：
 
-- 删除任务后，对应员工的工作次数会自动减少。
-- 员工编号用于识别和排序，不影响拖拽分配逻辑。
-- 日期相关展示默认采用北京时间（`Asia/Shanghai`）。
+1. 修改 `vite.config.ts` 中的 `base` 配置
+2. 运行 `npm run build`
+3. 上传 `dist` 目录
+
+## 数据安全说明
+
+- 所有用户数据存储在 Firebase Firestore
+- 每位用户只能访问自己创建的数据
+- Firebase 安全规则确保数据隔离
+- 建议在生产环境中配置 Firestore 安全规则
+
+## 许可证
+
+MIT License
+
+## 贡献
+
+欢迎提交 Issue 和 Pull Request！
