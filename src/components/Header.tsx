@@ -1,4 +1,5 @@
 import { type CSSProperties } from 'react';
+import { type User } from 'firebase/auth';
 
 interface HeaderProps {
   employeesCount: number;
@@ -8,12 +9,14 @@ interface HeaderProps {
   activeFilterCount: number;
   selectedTaskCount: number;
   heroProgress: number;
+  user: User | null;
   onAddEmployee: () => void;
   onAddTask: () => void;
   onOpenTaskFilter: () => void;
   onOpenTaskExport: () => void;
   onOpenTaskBatch: () => void;
   onReset: () => void;
+  onSignOut: () => void;
 }
 
 export function Header({
@@ -24,12 +27,14 @@ export function Header({
   activeFilterCount,
   selectedTaskCount,
   heroProgress,
+  user,
   onAddEmployee,
   onAddTask,
   onOpenTaskFilter,
   onOpenTaskExport,
   onOpenTaskBatch,
   onReset,
+  onSignOut,
 }: HeaderProps) {
   return (
     <header
@@ -49,11 +54,22 @@ export function Header({
         </div>
         <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 sm:justify-end">
           <span className="rounded-full border border-white/70 bg-white/75 px-2 py-0.5 text-[10px] font-semibold text-slate-600 shadow-sm sm:px-2.5 sm:py-1 sm:text-[11px] lg:text-xs">
-            北京时间工作流
+            云端同步
           </span>
-          <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 shadow-sm sm:px-2.5 sm:py-1 sm:text-[11px] lg:text-xs">
-            实时本地运行
-          </span>
+          {user && (
+            <div className="flex items-center gap-1.5">
+              <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 shadow-sm sm:px-2.5 sm:py-1 sm:text-[11px] lg:text-xs">
+                {user.email?.split('@')[0]}
+              </span>
+              <button
+                type="button"
+                onClick={onSignOut}
+                className="rounded-full border border-slate-200 bg-white/55 px-2 py-0.5 text-[10px] font-semibold text-slate-600 transition hover:bg-white sm:px-2.5 sm:py-1 sm:text-[11px] lg:text-xs"
+              >
+                退出
+              </button>
+            </div>
+          )}
         </div>
       </div>
 

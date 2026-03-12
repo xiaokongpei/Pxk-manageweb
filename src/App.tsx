@@ -10,8 +10,10 @@ import {
   type DragStartEvent,
 } from '@dnd-kit/core';
 import { seedEmployees, seedTasks } from './data/seed';
-import { useLocalStorageState } from './hooks/useLocalStorageState';
+import { useFirestoreState } from './hooks/useFirestoreState';
+import { useAuth } from './contexts/AuthContext';
 import { type Employee, type EmployeeInput, type Task, type TaskInput } from './types';
+import { AuthPage } from './components/AuthPage';
 import { EmployeeFormModal } from './components/EmployeeFormModal';
 import { EmployeePanel } from './components/EmployeePanel';
 import { Header } from './components/Header';
@@ -127,8 +129,17 @@ function clampProgress(value: number): number {
 }
 
 export default function App() {
-  const [employees, setEmployees] = useLocalStorageState<Employee[]>(EMPLOYEE_STORAGE_KEY, seedEmployees);
-  const [tasks, setTasks] = useLocalStorageState<Task[]>(TASK_STORAGE_KEY, seedTasks);
+  const { user, loading: authLoading, signOut } = useAuth();
+  const {
+    data: employees,
+    setData: setEmployees,
+    loading: employeesLoading,
+  } = useFirestoreState<Employee>('employees', seedEmployees);
+  const {
+    data: tasks,
+    setData: setTasks,
+    loading: tasksLoading,
+  } = useFirestoreState<Task>('tasks', seedTasks);
   const [employeeModal, setEmployeeModal] = useState<EmployeeModalState>({
     open: false,
     mode: 'create',
@@ -153,61 +164,6 @@ export default function App() {
   const heroSectionRef = useRef<HTMLElement | null>(null);
   const workspaceStoryRef = useRef<HTMLElement | null>(null);
   const insightStoryRef = useRef<HTMLElement | null>(null);
-
-  useEffect(() => {
-    setEmployees((prev) => {
-      let hasUpdate = false;
-
-      const normalized = prev.map((employee) => {
-        const normalizedCode = normalizeEmployeeCode(employee.employeeCode);
-        if (normalizedCode === employee.employeeCode) {
-          return employee;
-        }
-
-        hasUpdate = true;
-        return {
-          ...employee,
-          employeeCode: normalizedCode,
-        };
-      });
-
-      return hasUpdate ? normalized : prev;
-    });
-  }, [setEmployees]);
-
-  useEffect(() => {
-    const defaultDate = getCurrentBeijingDate();
-
-    setTasks((prev) => {
-      let hasUpdate = false;
-
-      const normalized = prev.map((task) => {
-        const normalizedDate = typeof task.date === 'string' && task.date.trim() ? task.date : defaultDate;
-        const normalizedAssigneeIds = normalizeAssigneeIds(task.assigneeIds);
-        const normalizedCompleted = typeof task.completed === 'boolean' ? task.completed : false;
-
-        const shouldUpdate =
-          normalizedDate !== task.date ||
-          normalizedCompleted !== task.completed ||
-          hasAssigneeDiff(task.assigneeIds, normalizedAssigneeIds);
-
-        if (!shouldUpdate) {
-          return task;
-        }
-
-        hasUpdate = true;
-
-        return {
-          ...task,
-          date: normalizedDate,
-          assigneeIds: normalizedAssigneeIds,
-          completed: normalizedCompleted,
-        };
-      });
-
-      return hasUpdate ? normalized : prev;
-    });
-  }, [setTasks]);
 
   useEffect(() => {
     setSelectedTaskIds((prev) => prev.filter((taskId) => tasks.some((task) => task.id === taskId)));
@@ -270,38 +226,66 @@ export default function App() {
       return;
     }
 
-    const elements = Array.from(document.querySelectorAll<HTMLElement>('.reveal-on-scroll'));
-    if (elements.length === 0) {
+    // 等待数据加载完成后再处理动画
+    if (employeesLoading || tasksLoading) {
       return;
     }
 
-    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    if (reduceMotion) {
-      elements.forEach((element) => element.classList.add('is-visible'));
+    // 用户未登录时不处理动画
+    if (!user) {
       return;
     }
 
-    const observer = new IntersectionObserver(
-      (entries) => {
-        entries.forEach((entry) => {
-          if (!entry.isIntersecting) {
-            return;
-          }
+    let observer: IntersectionObserver | null = null;
+    let retryCount = 0;
+    const maxRetries = 5;
 
-          entry.target.classList.add('is-visible');
-          observer.unobserve(entry.target);
-        });
-      },
-      {
-        threshold: 0.16,
-        rootMargin: '0px 0px -10% 0px',
-      },
-    );
+    const setupObserver = () => {
+      const elements = Array.from(document.querySelectorAll<HTMLElement>('.reveal-on-scroll'));
 
-    elements.forEach((element) => observer.observe(element));
+      if (elements.length === 0) {
+        retryCount++;
+        if (retryCount < maxRetries) {
+          // DOM 还没渲染完，重试
+          setTimeout(setupObserver, 100);
+        }
+        return;
+      }
 
-    return () => observer.disconnect();
-  }, []);
+      const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      if (reduceMotion) {
+        elements.forEach((element) => element.classList.add('is-visible'));
+        return;
+      }
+
+      observer = new IntersectionObserver(
+        (entries) => {
+          entries.forEach((entry) => {
+            if (!entry.isIntersecting) {
+              return;
+            }
+
+            entry.target.classList.add('is-visible');
+            observer?.unobserve(entry.target);
+          });
+        },
+        {
+          threshold: 0.08,
+          rootMargin: '0px 0px -5% 0px',
+        },
+      );
+
+      elements.forEach((element) => observer?.observe(element));
+    };
+
+    // 使用 setTimeout 确保 DOM 已渲染
+    const timeoutId = setTimeout(setupObserver, 50);
+
+    return () => {
+      clearTimeout(timeoutId);
+      observer?.disconnect();
+    };
+  }, [employeesLoading, tasksLoading, user]);
   const sensors = useSensors(
     useSensor(MouseSensor, {
       activationConstraint: {
@@ -352,6 +336,25 @@ export default function App() {
     [insightProgress],
   );
   const activeEmployee = activeEmployeeId ? employeesById.get(activeEmployeeId) ?? null : null;
+
+  // 加载中状态
+  if (authLoading || employeesLoading || tasksLoading) {
+    return (
+      <div className="app-shell">
+        <div className="mx-auto flex min-h-[60vh] max-w-[1600px] items-center justify-center">
+          <div className="text-center">
+            <div className="mx-auto h-8 w-8 animate-spin rounded-full border-4 border-emerald-200 border-t-emerald-600" />
+            <p className="mt-4 text-sm text-slate-500">加载中...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // 未登录显示登录页面
+  if (!user) {
+    return <AuthPage />;
+  }
 
   const openCreateEmployeeModal = () => {
     setEmployeeModal({ open: true, mode: 'create', target: null });
@@ -639,12 +642,14 @@ export default function App() {
               activeFilterCount={activeFilterCount}
               selectedTaskCount={selectedTaskIds.length}
               heroProgress={heroProgress}
+              user={user}
               onAddEmployee={openCreateEmployeeModal}
               onAddTask={openCreateTaskModal}
               onOpenTaskFilter={() => setTaskFilterModalOpen(true)}
               onOpenTaskExport={() => setTaskExportModalOpen(true)}
               onOpenTaskBatch={() => setTaskBatchModalOpen(true)}
               onReset={resetSampleData}
+              onSignOut={signOut}
             />
           </section>
           <section
