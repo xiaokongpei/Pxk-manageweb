@@ -1,8 +1,8 @@
-﻿import { useEffect, useMemo, useState } from 'react';
+﻿import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import {
   DndContext,
   DragOverlay,
-  PointerSensor,
+  MouseSensor,
   closestCorners,
   useSensor,
   useSensors,
@@ -20,8 +20,9 @@ import { TaskBoard } from './components/TaskBoard';
 import { TaskExportModal } from './components/TaskExportModal';
 import { TaskFilterModal } from './components/TaskFilterModal';
 import { TaskFormModal } from './components/TaskFormModal';
+import { TaskAssigneeModal } from './components/TaskAssigneeModal';
 import { WorkCalendar } from './components/WorkCalendar';
-import { WorkStats } from './components/WorkStats';
+import { WorkDetailsGrid, WorkStatsChart, type SortMode } from './components/WorkStats';
 import { exportTasksAsCsv, exportTasksAsExcel } from './utils/taskExport';
 import { getCurrentBeijingDate } from './utils/beijingTime';
 
@@ -37,6 +38,11 @@ type EmployeeModalState = {
 type TaskModalState = {
   open: boolean;
   mode: 'create' | 'edit';
+  target: Task | null;
+};
+
+type TaskAssigneeModalState = {
+  open: boolean;
   target: Task | null;
 };
 
@@ -116,6 +122,10 @@ function hasAssigneeDiff(raw: unknown, normalized: string[]): boolean {
   return normalized.some((item, index) => item !== raw[index]);
 }
 
+function clampProgress(value: number): number {
+  return Math.min(1, Math.max(0, value));
+}
+
 export default function App() {
   const [employees, setEmployees] = useLocalStorageState<Employee[]>(EMPLOYEE_STORAGE_KEY, seedEmployees);
   const [tasks, setTasks] = useLocalStorageState<Task[]>(TASK_STORAGE_KEY, seedTasks);
@@ -131,10 +141,18 @@ export default function App() {
   });
   const [taskFilterModalOpen, setTaskFilterModalOpen] = useState(false);
   const [taskExportModalOpen, setTaskExportModalOpen] = useState(false);
+  const [taskAssigneeModal, setTaskAssigneeModal] = useState<TaskAssigneeModalState>({ open: false, target: null });
   const [taskBatchModalOpen, setTaskBatchModalOpen] = useState(false);
   const [taskFilters, setTaskFilters] = useState<TaskFilters>(emptyTaskFilters);
   const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([]);
   const [activeEmployeeId, setActiveEmployeeId] = useState<string | null>(null);
+  const [statsSortMode, setStatsSortMode] = useState<SortMode>('code');
+  const [heroProgress, setHeroProgress] = useState(0);
+  const [workspaceProgress, setWorkspaceProgress] = useState(0);
+  const [insightProgress, setInsightProgress] = useState(0);
+  const heroSectionRef = useRef<HTMLElement | null>(null);
+  const workspaceStoryRef = useRef<HTMLElement | null>(null);
+  const insightStoryRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     setEmployees((prev) => {
@@ -195,8 +213,97 @@ export default function App() {
     setSelectedTaskIds((prev) => prev.filter((taskId) => tasks.some((task) => task.id === taskId)));
   }, [tasks]);
 
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const root = document.documentElement;
+    let frame = 0;
+
+    const measureProgress = (element: HTMLElement | null, viewportHeight: number, travelFactor: number) => {
+      if (!element) {
+        return 0;
+      }
+
+      const rect = element.getBoundingClientRect();
+      const totalDistance = rect.height + viewportHeight * travelFactor;
+      if (totalDistance <= 0) {
+        return 0;
+      }
+
+      return clampProgress((viewportHeight - rect.top) / totalDistance);
+    };
+
+    const updateScrollDepth = () => {
+      const viewportHeight = window.innerHeight || 1;
+      root.style.setProperty('--scroll-depth', `${window.scrollY}px`);
+      setHeroProgress(measureProgress(heroSectionRef.current, viewportHeight, 0.45));
+      setWorkspaceProgress(measureProgress(workspaceStoryRef.current, viewportHeight, 0.82));
+      setInsightProgress(measureProgress(insightStoryRef.current, viewportHeight, 0.82));
+      frame = 0;
+    };
+
+    const handleScroll = () => {
+      if (frame !== 0) {
+        return;
+      }
+
+      frame = window.requestAnimationFrame(updateScrollDepth);
+    };
+
+    updateScrollDepth();
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    window.addEventListener('resize', handleScroll);
+
+    return () => {
+      if (frame !== 0) {
+        window.cancelAnimationFrame(frame);
+      }
+      window.removeEventListener('scroll', handleScroll);
+      window.removeEventListener('resize', handleScroll);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const elements = Array.from(document.querySelectorAll<HTMLElement>('.reveal-on-scroll'));
+    if (elements.length === 0) {
+      return;
+    }
+
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reduceMotion) {
+      elements.forEach((element) => element.classList.add('is-visible'));
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (!entry.isIntersecting) {
+            return;
+          }
+
+          entry.target.classList.add('is-visible');
+          observer.unobserve(entry.target);
+        });
+      },
+      {
+        threshold: 0.16,
+        rootMargin: '0px 0px -10% 0px',
+      },
+    );
+
+    elements.forEach((element) => observer.observe(element));
+
+    return () => observer.disconnect();
+  }, []);
   const sensors = useSensors(
-    useSensor(PointerSensor, {
+    useSensor(MouseSensor, {
       activationConstraint: {
         distance: 8,
       },
@@ -230,6 +337,20 @@ export default function App() {
     return [taskFilters.date, taskFilters.employeeId, taskFilters.keyword.trim()].filter(Boolean).length;
   }, [taskFilters]);
 
+  const pendingTaskCount = useMemo(() => tasks.filter((task) => !task.completed).length, [tasks]);
+  const completedTaskCount = useMemo(() => tasks.filter((task) => task.completed).length, [tasks]);
+  const heroStyle = useMemo(
+    () => ({ '--hero-progress': String(heroProgress) } as CSSProperties),
+    [heroProgress],
+  );
+  const workspaceStoryStyle = useMemo(
+    () => ({ '--story-progress': String(workspaceProgress) } as CSSProperties),
+    [workspaceProgress],
+  );
+  const insightStoryStyle = useMemo(
+    () => ({ '--story-progress': String(insightProgress), '--panel-progress': String(insightProgress) } as CSSProperties),
+    [insightProgress],
+  );
   const activeEmployee = activeEmployeeId ? employeesById.get(activeEmployeeId) ?? null : null;
 
   const openCreateEmployeeModal = () => {
@@ -254,6 +375,14 @@ export default function App() {
 
   const closeTaskModal = () => {
     setTaskModal({ open: false, mode: 'create', target: null });
+  };
+
+  const openTaskAssigneeModal = (task: Task) => {
+    setTaskAssigneeModal({ open: true, target: task });
+  };
+
+  const closeTaskAssigneeModal = () => {
+    setTaskAssigneeModal({ open: false, target: null });
   };
 
   const toggleTaskSelection = (taskId: string) => {
@@ -378,6 +507,18 @@ export default function App() {
     );
   };
 
+  const updateTaskAssignees = (taskId: string, assigneeIds: string[]) => {
+    const validIds = assigneeIds.filter((employeeId, index) => employeesById.has(employeeId) && assigneeIds.indexOf(employeeId) === index);
+
+    setTasks((prev) =>
+      prev.map((task) => (
+        task.id === taskId
+          ? { ...task, assigneeIds: validIds }
+          : task
+      )),
+    );
+  };
+
   const assignEmployeeToSelectedTasks = (employeeId: string) => {
     if (selectedTaskIds.length === 0 || !employeesById.has(employeeId)) {
       return;
@@ -488,53 +629,87 @@ export default function App() {
       onDragCancel={onDragCancel}
     >
       <div className="app-shell">
-        <div className="mx-auto max-w-[1450px]">
-          <Header
-            employeesCount={employees.length}
-            tasksCount={tasks.length}
-            activeFilterCount={activeFilterCount}
-            selectedTaskCount={selectedTaskIds.length}
-            onAddEmployee={openCreateEmployeeModal}
-            onAddTask={openCreateTaskModal}
-            onOpenTaskFilter={() => setTaskFilterModalOpen(true)}
-            onOpenTaskExport={() => setTaskExportModalOpen(true)}
-            onOpenTaskBatch={() => setTaskBatchModalOpen(true)}
-            onReset={resetSampleData}
-          />
-
-          <main className="grid gap-5 xl:grid-cols-[340px,1fr]">
-            <EmployeePanel
-              employees={employees}
-              onEdit={openEditEmployeeModal}
-              onDelete={deleteEmployee}
+        <div className="mx-auto max-w-[1600px]">
+          <section ref={heroSectionRef} style={heroStyle}>
+            <Header
+              employeesCount={employees.length}
+              tasksCount={tasks.length}
+              pendingTaskCount={pendingTaskCount}
+              completedTaskCount={completedTaskCount}
+              activeFilterCount={activeFilterCount}
+              selectedTaskCount={selectedTaskIds.length}
+              heroProgress={heroProgress}
+              onAddEmployee={openCreateEmployeeModal}
+              onAddTask={openCreateTaskModal}
+              onOpenTaskFilter={() => setTaskFilterModalOpen(true)}
+              onOpenTaskExport={() => setTaskExportModalOpen(true)}
+              onOpenTaskBatch={() => setTaskBatchModalOpen(true)}
+              onReset={resetSampleData}
             />
-            <TaskBoard
-              tasks={filteredTasks}
-              totalTaskCount={tasks.length}
-              selectedTaskIds={selectedTaskIds}
-              selectedVisibleCount={selectedVisibleCount}
-              employeesById={employeesById}
-              onEdit={openEditTaskModal}
-              onDelete={deleteTask}
-              onUnassign={unassignEmployeeFromTask}
-              onToggleSelect={toggleTaskSelection}
-              onToggleComplete={toggleTaskComplete}
-            />
-          </main>
+          </section>
+          <section
+            ref={workspaceStoryRef}
+            style={workspaceStoryStyle}
+            className="reveal-on-scroll mt-4 sm:mt-5 lg:mt-6"
+          >
+            <main className="grid items-start gap-3 sm:gap-4 lg:grid-cols-[minmax(280px,320px)_minmax(0,1fr)] xl:grid-cols-[minmax(300px,360px)_minmax(0,1fr)]">
+              <div className="reveal-on-scroll reveal-delay-1 min-w-0">
+                <EmployeePanel
+                  employees={employees}
+                  onEdit={openEditEmployeeModal}
+                  onDelete={deleteEmployee}
+                />
+              </div>
+              <div className="reveal-on-scroll reveal-delay-2 min-w-0">
+                <TaskBoard
+                  tasks={filteredTasks}
+                  totalTaskCount={tasks.length}
+                  selectedTaskIds={selectedTaskIds}
+                  selectedVisibleCount={selectedVisibleCount}
+                  employeesById={employeesById}
+                  onEdit={openEditTaskModal}
+                  onDelete={deleteTask}
+                  onManageAssignees={openTaskAssigneeModal}
+                  onToggleSelect={toggleTaskSelection}
+                  onToggleComplete={toggleTaskComplete}
+                />
+              </div>
+            </main>
+          </section>
 
-          <section className="mt-5 grid gap-5 2xl:grid-cols-[1.2fr,0.8fr]">
-            <WorkCalendar tasks={tasks} employeesById={employeesById} />
-            <WorkStats employees={employees} tasks={tasks} />
+          <section
+            ref={insightStoryRef}
+            style={insightStoryStyle}
+            className="reveal-on-scroll mt-4 sm:mt-5 lg:mt-6"
+          >
+            <section className="grid items-stretch gap-3 sm:gap-4 xl:grid-cols-2 2xl:grid-cols-[minmax(0,1.06fr)_minmax(0,0.94fr)]">
+              <div className="reveal-on-scroll reveal-delay-1 min-w-0">
+                <WorkCalendar tasks={tasks} employeesById={employeesById} motionProgress={insightProgress} />
+              </div>
+              <div className="reveal-on-scroll reveal-delay-2 min-w-0">
+                <WorkStatsChart
+                  employees={employees}
+                  tasks={tasks}
+                  sortMode={statsSortMode}
+                  onSortChange={setStatsSortMode}
+                  motionProgress={insightProgress}
+                />
+              </div>
+            </section>
+
+            <div className="reveal-on-scroll reveal-delay-2 min-w-0">
+              <WorkDetailsGrid employees={employees} tasks={tasks} sortMode={statsSortMode} />
+            </div>
           </section>
         </div>
       </div>
 
       <DragOverlay>
         {activeEmployee ? (
-          <div className="w-64 rounded-xl border border-emerald-400 bg-white p-3 shadow-2xl">
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-emerald-700">拖拽中</p>
-            <p className="mt-1 font-semibold text-slate-900">{activeEmployee.name}</p>
-            <p className="text-xs text-slate-500">编号 {activeEmployee.employeeCode || '未设'} | {activeEmployee.contact || '未填写联系方式'}</p>
+          <div className="w-56 rounded-xl border border-emerald-400 bg-white p-2.5 shadow-2xl sm:w-64 sm:p-3">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-emerald-700 sm:text-xs sm:tracking-[0.16em]">分配中</p>
+            <p className="mt-1 text-sm font-semibold text-slate-900 sm:text-base">{activeEmployee.name}</p>
+            <p className="text-[11px] text-slate-500 sm:text-xs">编号 {activeEmployee.employeeCode || '未设'} | {activeEmployee.contact || '无联系方式'}</p>
           </div>
         ) : null}
       </DragOverlay>
@@ -553,6 +728,14 @@ export default function App() {
         initialValue={taskModal.target}
         onClose={closeTaskModal}
         onSubmit={handleTaskFormSubmit}
+      />
+
+      <TaskAssigneeModal
+        open={taskAssigneeModal.open}
+        task={taskAssigneeModal.target}
+        employees={employees}
+        onClose={closeTaskAssigneeModal}
+        onSave={updateTaskAssignees}
       />
 
       <TaskFilterModal
@@ -587,3 +770,33 @@ export default function App() {
     </DndContext>
   );
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
